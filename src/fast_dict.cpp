@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
       uint8_t c = curByte - 'A';
       uint8_t check = (c & (uint8_t)(255 - 32));
       if (check < 26) {
-        uint8_t lc = (c & (uint8_t)(31)) + 'a';
+        uint8_t lc = check + 'a';
 //        state[state_size] = lc;
 //        ++state_size;
         state.push_back(lc);
