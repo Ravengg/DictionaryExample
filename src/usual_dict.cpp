@@ -1,4 +1,5 @@
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -47,7 +48,7 @@ int main(int argc, char** argv) {
   std::vector<std::pair<size_t, std::string>> v;
   v.reserve(dict.size());
 
-  for (auto&& elem: dict) {
+  for(auto&& elem: dict) {
     v.push_back(std::make_pair(elem.second, std::move(elem.first)));
   }
   std::sort(v.begin(), v.end(),
