@@ -10,52 +10,11 @@
 #include <limits>
 
 #include "FlatHashMap.hpp"
+//#include "../../hashes/clhash/include/clhash.h"
+//#include "../../hashes/clhash/src/clhash.c"
+//#include "../../hashes/xxhash_cpp/include/xxhash.hpp"
 
 class StrokaHasher;
-
-inline uint32_t MurmurHash64A(const void *key, uint32_t len, unsigned int seed)
-{
-  //return ((uint32_t*)key)[0];
-  const uint64_t m = 0xc6a4a7935bd1e995;
-  const int r = 47;
-
-  uint64_t h = seed ^ (len * m);
-
-  const auto *data = (const uint64_t *)key;
-  const uint64_t *end = data + (len / 8);
-
-  while (data != end)
-  {
-    uint64_t k = *data++;
-
-    k *= m;
-    k ^= k >> r;
-    k *= m;
-
-    h ^= k;
-    h *= m;
-  }
-
-  const auto *data2 = (const unsigned char *)data;
-
-  switch (len & 7)
-  {
-  case 7: h ^= uint64_t(data2[6]) << 48; [[fallthrough]];
-  case 6: h ^= uint64_t(data2[5]) << 40; [[fallthrough]];
-  case 5: h ^= uint64_t(data2[4]) << 32; [[fallthrough]];
-  case 4: h ^= uint64_t(data2[3]) << 24; [[fallthrough]];
-  case 3: h ^= uint64_t(data2[2]) << 16; [[fallthrough]];
-  case 2: h ^= uint64_t(data2[1]) << 8; [[fallthrough]];
-  case 1: h ^= uint64_t(data2[0]); h *= m;
-  };
-
-  h ^= h >> r;
-  h *= m;
-  h ^= h >> r;
-
-  return h;
-}
-
 
 class Stroka { // yandex style
   friend StrokaHasher;
@@ -89,19 +48,93 @@ private:
 //  size_t hash_;
 };
 
+
 class StrokaHasher {
 public:
   using hash_policy = ska::power_of_two_hash_policy;
 
   inline size_t operator()(const Stroka& s) const noexcept {
+    static const int p = 31;
+    //static const int m = 1e9 + 9;
+    size_t hash_value = 0;
+    for (int i = 0; i < s.size_; ++i) {
+      hash_value = (hash_value * p + (s.s_[i] - 'a' + 1));// % m;
+    }
+    return hash_value;
     //return s.hash_;
-    return MurmurHash64A(s.s_, static_cast<uint64_t>(s.size_), 0);
+   // return MurmurHash64A(s.s_, static_cast<uint64_t>(s.size_), 0);
   }
 };
+
+class FastHasher {
+public:
+  using hash_policy = ska::power_of_two_hash_policy;
+
+  static void fill() {
+    generate_table(table_);
+  }
+
+  static void generate_table(uint32_t (&table)[256]) {
+    uint32_t polynomial = 0xEDB88320;
+    for (uint32_t i = 0; i < 256; i++) {
+      uint32_t c = i;
+      for (size_t j = 0; j < 8; j++) {
+        if (c & 1) {
+          c = polynomial ^ (c >> 1);
+        } else {
+          c >>= 1;
+        }
+      }
+      table[i] = c;
+    }
+  }
+
+  static uint32_t update(const uint32_t (&table)[256], uint32_t initial,
+                         const void *buf, size_t len) {
+    uint32_t c = initial ^ 0xFFFFFFFF;
+    const uint8_t *u = static_cast<const uint8_t *>(buf);
+    for (size_t i = 0; i < len; ++i) {
+      c = table[(c ^ u[i]) & 0xFF] ^ (c >> 8);
+    }
+    return c ^ 0xFFFFFFFF;
+  }
+
+  inline uint32_t hash(const std::string& s) {
+    return update(table_, 42, s.data(), s.size());
+  }
+
+  inline size_t operator()(const std::string& s) {
+    return hash(s);
+  }
+
+  static uint32_t table_[256];
+};
+
+uint32_t FastHasher::table_[256];
 
 class power_two_hasher : public std::hash<std::string> {
 public:
   using hash_policy = ska::power_of_two_hash_policy;
+
+  //inline size_t operator()(const std::string& s) const noexcept {
+
+
+
+//    constexpr static const int p = 31;
+//    //static const int m = 1e9 + 9;
+//    size_t hash_value = 0;
+//    for (char c: s) {
+//      hash_value = (hash_value * p + (c - 'a' + 1));// % m;
+//    }
+//    return hash_value;
+
+//    static clhasher h(UINT64_C(0x23a23cf5033c3c81),UINT64_C(0xb3816f6a2c68e530));
+//    return h(s);
+    //return s.hash_;
+   //  return MurmurHash64A(s.c_str(), static_cast<uint64_t>(s.size()), 0);
+    // return xxh::xxhash<64>(s);
+    //return fastHasher.hash(s);
+  //}
 };
 
 struct Counter {
@@ -109,7 +142,7 @@ struct Counter {
 };
 
 //using stringMap = ska::flat_hash_map<Stroka, Counter, StrokaHasher>;
-using stringMap = ska::flat_hash_map<std::string, Counter, power_two_hasher>;
+using stringMap = ska::flat_hash_map<std::string, Counter, FastHasher>;
 
 //inline void putState(stringMap& dict,
 //                     const char* state, int state_size, std::vector<char*>& stringKeeper) noexcept {
@@ -159,6 +192,8 @@ int main(int argc, char** argv) {
 
   char curByte;
 
+  FastHasher::fill();
+
   stringMap dict;
   dict.reserve(1024);
   dict.max_load_factor(0.3);
@@ -183,6 +218,7 @@ int main(int argc, char** argv) {
        // state[state_size] = '\0';
         putState(dict, state);//, state_size, stringKeeper);
         //state_size = 0;
+
       }
     }
     if (size != bufSize) {
